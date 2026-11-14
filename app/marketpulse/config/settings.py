@@ -24,5 +24,9 @@ class Settings:
     def data_dir(self) -> Path:
         return self.project_root / "data"
 
+    @property
+    def instrument_dir(self) -> Path:
+        return self.data_dir / "instruments"
+
 
 settings = Settings()

@@ -62,6 +62,12 @@ class SettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.data_dir, settings.project_root / "data")
 
+    def test_instrument_directory_is_under_data_directory(self):
+        settings = Settings()
+
+        self.assertEqual(settings.instrument_dir, settings.data_dir / "instruments")
+        self.assertEqual(settings.instrument_dir.parent, settings.data_dir)
+
     def test_settings_are_frozen(self):
         settings = Settings()
 
