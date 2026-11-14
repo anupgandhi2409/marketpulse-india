@@ -112,7 +112,9 @@ Settings are frozen after construction. `project_root` is derived from the setti
 
 ## 9. Data storage principles
 
-No application storage layer is implemented yet. The current settings only define locations for future data. Planned local CSV storage should use explicit exchange-segment separation, retain source and retrieval-time context where appropriate, and avoid silently overwriting a valid snapshot with an invalid or partial download. Retention, history, and any database choice remain future design decisions. Do not assume the Kotak SDK's own cache is the application's managed instrument store.
+Basic application-managed instrument master CSV storage is implemented through `InstrumentMasterStore`. CSV files are stored by exchange segment under `data/instruments/`. The store validates CSV structure before saving and uses atomic replacement so an invalid or interrupted replacement does not corrupt an existing valid file.
+
+Downloading instrument masters, refresh scheduling, freshness validation, and historical retention are still planned. Keep source and retrieval-time context where appropriate, and do not assume the Kotak SDK's own cache is the application's managed instrument store. Any future storage choices should preserve these principles and avoid silently overwriting valid data with invalid or partial input.
 
 ## 10. Security and broker integration principles
 

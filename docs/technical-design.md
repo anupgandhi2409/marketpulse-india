@@ -52,7 +52,9 @@
 
 ### Instrument master service
 
-**Proposed:** an application service should obtain segment-specific reference files, validate their basic integrity and freshness, and provide a stable lookup interface to downstream components.
+**Implemented:** `InstrumentMasterStore` in `app/marketpulse/data/instrument_store.py` saves and loads CSV text by exchange segment under `settings.instrument_dir`, using `<segment>.csv` filenames. It validates segment names against path traversal, checks that CSV text is non-empty and parseable with a header, at least one data row, and consistent column counts, and preserves the input text and original header/field names. The directory is created on save only. Save uses a temporary file in the destination directory followed by an atomic replacement, so validation failures and interrupted writes do not replace an existing file.
+
+**Proposed:** a separate acquisition flow should obtain segment-specific reference files and pass them to this storage service after download validation. A stable lookup interface for downstream consumers may be added when a concrete use case is established. The store does not fetch data, inspect Kotak schemas, or validate market-data freshness.
 
 ### Market data processing
 
@@ -85,10 +87,10 @@ The SDK may include order-related APIs, but the application design must not expo
 ## 5. Instrument master design
 
 - **Confirmed:** the SDK's `scrip_master` method retrieves scrip-master metadata and can return a file path for a requested exchange segment. The SDK's search implementation obtains segment CSV bytes, uses Pandas to parse them, and caches its own copy locally for the calendar day. This SDK-managed cache is separate from application storage.
-- **Proposed:** application-managed files should live under the configured `data/instruments/` location. The settings property exists, but no downloader, directory creation, or managed persistence is implemented.
-- **Proposed:** store exchange segments separately so one segment refresh or validation failure does not replace unrelated data.
-- **Proposed:** preserve original Kotak column names at first. Add a separate mapping/normalization layer only when verified fields and downstream needs are known.
-- **Proposed:** record retrieval time and segment context in file naming or companion metadata, subject to the final format decision. Validate that a download is non-empty, parseable, and plausibly current before replacing the last known good file.
+- **Implemented:** application-managed CSV text is stored under the configured `data/instruments/` location, with separate `<segment>.csv` files. Storage validates CSV structure and atomically replaces the matching segment file only after validation.
+- **Implemented:** the store preserves the provided CSV text and header names without field normalization. It does not create storage directories until a save is requested.
+- **Proposed:** a downloader should acquire and pass segment-specific files into the store. The current implementation does not download instrument masters, attach retrieval timestamps, or validate freshness.
+- **Proposed:** add a separate mapping/normalization layer only when verified fields and downstream needs are known.
 - **Open Question:** determine refresh cadence, retention/history policy, cache invalidation behavior, and whether the application should reuse SDK-discovered files or download/own its own copies.
 - **Open Question:** verify exact file naming, segment identifiers, columns, and formats from authorized real responses before building schema-dependent logic. This document intentionally does not assert field names.
 
