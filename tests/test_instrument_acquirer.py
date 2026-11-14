@@ -1,9 +1,13 @@
 import io
+import ssl
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 from urllib.request import Request
 
+import certifi
+
+import marketpulse.data.instrument_acquirer as instrument_acquirer_module
 from marketpulse.data.instrument_acquirer import (
     HttpsInstrumentDownloader,
     InstrumentAcquisitionError,
@@ -163,6 +167,43 @@ class _ShortReadResponse(_FakeResponse):
 
 class HttpsInstrumentDownloaderTests(unittest.TestCase):
     URL = "https://cdn.example.test/file.csv"
+
+    def test_default_opener_uses_certifi_verified_ssl_context(self):
+        expected_context = object()
+        expected_opener = Mock()
+        with (
+            patch.object(certifi, "where", return_value="/certs/cacert.pem") as certifi_where,
+            patch.object(
+                ssl, "create_default_context", return_value=expected_context
+            ) as context_factory,
+            patch.object(instrument_acquirer_module, "HTTPSHandler") as https_handler,
+            patch.object(
+                instrument_acquirer_module, "build_opener", return_value=expected_opener
+            ) as build_opener,
+        ):
+            downloader = HttpsInstrumentDownloader()
+
+        certifi_where.assert_called_once_with()
+        context_factory.assert_called_once_with(cafile="/certs/cacert.pem")
+        https_handler.assert_called_once_with(context=expected_context)
+        opener_handlers = build_opener.call_args.args
+        self.assertEqual(len(opener_handlers), 2)
+        self.assertIsInstance(opener_handlers[0], _HttpsOnlyRedirectHandler)
+        self.assertIs(opener_handlers[1], https_handler.return_value)
+        self.assertIs(downloader._opener, expected_opener)
+
+    def test_custom_opener_is_used_without_building_default_tls_opener(self):
+        response = _FakeResponse(content=b"a,b\n1,2\n")
+        custom_opener = Mock()
+        custom_opener.open.return_value = response
+
+        with patch.object(instrument_acquirer_module, "build_opener") as build_opener:
+            downloader = HttpsInstrumentDownloader(opener=custom_opener)
+            result = downloader(self.URL)
+
+        self.assertEqual(result, b"a,b\n1,2\n")
+        self.assertIs(downloader._opener, custom_opener)
+        build_opener.assert_not_called()
 
     def test_download_uses_timeout_checks_success_and_returns_raw_bytes(self):
         response = _FakeResponse(content=b"a,b\n1,2\n")

@@ -11,7 +11,7 @@
 
 **Proposed:** MarketPulse India will follow a local-first, layered design. Provider adapters retrieve data, processing validates and normalizes it, analytics derives report-ready measures, and dashboard/report components present the results. Configuration and storage paths are shared through a small settings layer.
 
-**Implemented:** the current codebase is a foundation rather than an end-to-end application. It has settings, one Kotak wrapper, package placeholders, and unit tests. No fetch-to-report pipeline currently connects them.
+**Implemented:** the current codebase remains a foundation rather than an end-to-end market-intelligence application. The instrument-master path connects acquisition, application-managed storage, parsing, lookup, and quality reporting; no general market-data fetch-to-report pipeline connects other data sources to reports or a dashboard.
 
 ## 2. High-level component architecture
 
@@ -36,7 +36,7 @@
           └──────────────────┘          └──────────────────┘
 ```
 
-**Proposed:** instrument-master lookup and storage support the provider/processing boundary. Manual and scheduled runs should invoke the same application workflow to avoid divergent behavior.
+**Implemented:** instrument-master acquisition, storage, lookup, and quality reporting support the provider/processing boundary. **Proposed:** manual and scheduled runs should invoke the same broader application workflow to avoid divergent behavior.
 
 ## 3. Component responsibilities
 
@@ -52,9 +52,13 @@
 
 ### Instrument master service
 
-**Implemented:** `InstrumentMasterStore` in `app/marketpulse/data/instrument_store.py` saves and loads CSV text by exchange segment under `settings.instrument_dir`, using `<segment>.csv` filenames. It validates segment names against path traversal, checks that CSV text is non-empty and parseable with a header, at least one data row, and consistent column counts, and preserves the input text and original header/field names. The directory is created on save only. Save uses a temporary file in the destination directory followed by an atomic replacement, so validation failures and interrupted writes do not replace an existing file.
+**Implemented:** `InstrumentMasterAcquirer` obtains a segment-specific HTTPS location through the provider, uses the bounded certifi-TLS downloader, decodes UTF-8 CSV, and passes it to the store. `InstrumentMasterStore` saves and loads CSV text by exchange segment under `settings.instrument_dir`, using `<segment>.csv` filenames. It validates segment names against path traversal and basic CSV structure, preserves input text and headers, and uses atomic replacement. It does not fetch data itself or validate freshness.
 
-**Proposed:** a separate acquisition flow should obtain segment-specific reference files and pass them to this storage service after download validation. A stable lookup interface for downstream consumers may be added when a concrete use case is established. The store does not fetch data, inspect Kotak schemas, or validate market-data freshness.
+**Implemented:** `InstrumentMasterParser` maps the required and recognized optional Kotak columns into the source-neutral `Instrument` model and rejects malformed structure or missing required headers/values. `InstrumentMasterService` loads and parses instruments and supports exact symbol lookups. Its `get_quality_report(exchange_segment)` loads the CSV once, parses it with the existing parser, extracts original `pInstType` values with the standard-library CSV reader, and passes both aligned inputs to `InstrumentMasterQualityReporter`. A missing `pInstType` column produces a clear `ValueError`; ordinary instrument loading remains independent of that source column.
+
+**Implemented:** `InstrumentMasterQualityReporter` is a standalone, non-rejecting reporter. It reports total records; exchange- and market-segment distributions; required and optional field completeness; duplicate tokens, symbols, trading symbols, and ISINs; lot-size distributions and numeric zero/negative observations using `Decimal`; series distribution; and blank counts/distribution for source `pInstType` values. Blank identifiers are excluded from duplicate counts. It preserves unusual lot-size strings and does not infer undocumented Kotak field meanings.
+
+**Implemented:** the local NSE Cash snapshot is kept under Git-ignored `data/instruments/nse_cm.csv`. Real-data regression and service integration tests use it when available, skip when absent, and avoid pinning its record count or distributions. At the 6M documentation update, the complete unittest suite has 94 passing tests.
 
 ### Market data processing
 
@@ -89,16 +93,16 @@ The SDK may include order-related APIs, but the application design must not expo
 - **Confirmed:** the SDK's `scrip_master` method retrieves scrip-master metadata and can return a file path for a requested exchange segment. The SDK's search implementation obtains segment CSV bytes, uses Pandas to parse them, and caches its own copy locally for the calendar day. This SDK-managed cache is separate from application storage.
 - **Implemented:** application-managed CSV text is stored under the configured `data/instruments/` location, with separate `<segment>.csv` files. Storage validates CSV structure and atomically replaces the matching segment file only after validation.
 - **Implemented:** the store preserves the provided CSV text and header names without field normalization. It does not create storage directories until a save is requested.
-- **Proposed:** a downloader should acquire and pass segment-specific files into the store. The current implementation does not download instrument masters, attach retrieval timestamps, or validate freshness.
+- **Implemented:** segment-specific files can be acquired over HTTPS and saved through the application store. The current flow does not attach retrieval timestamps or validate freshness.
 - **Proposed:** add a separate mapping/normalization layer only when verified fields and downstream needs are known.
 - **Open Question:** determine refresh cadence, retention/history policy, cache invalidation behavior, and whether the application should reuse SDK-discovered files or download/own its own copies.
-- **Open Question:** verify exact file naming, segment identifiers, columns, and formats from authorized real responses before building schema-dependent logic. This document intentionally does not assert field names.
+- **Confirmed:** the locally retained NSE Cash snapshot contains the columns consumed by the current Kotak parser, including `pSymbol`, `pExchSeg`, `pSymbolName`, and `pTrdSymbol`. The parser maps only its known columns; remaining provider fields are not assigned undocumented semantics.
 
 ## 6. Market data processing architecture
 
 **Proposed:** a pipeline should have explicit stages: acquire provider response, attach retrieval context, validate source result, parse into a source-aware representation, normalize only verified common concepts, compute analytics inputs, and report completeness/freshness. Failures should be visible to downstream reports rather than silently interpreted as zero or unchanged values.
 
-**Implemented:** no such ingestion or processing pipeline exists. The current provider wrapper only forwards SDK calls.
+**Implemented:** a general multi-source ingestion and analytics pipeline does not yet exist. Instrument-master acquisition and quality reporting are implemented as a focused path; the provider wrapper continues to forward SDK calls without defining normalized market-data schemas.
 
 ## 7. Proposed dashboard architecture
 

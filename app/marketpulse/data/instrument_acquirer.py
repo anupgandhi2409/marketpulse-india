@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import ssl
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPSHandler, HTTPRedirectHandler, Request, build_opener
+
+import certifi
 
 DEFAULT_TIMEOUT_SECONDS = 20
 DEFAULT_MAX_RESPONSE_BYTES = 25 * 1024 * 1024
@@ -89,7 +92,14 @@ class HttpsInstrumentDownloader:
             raise ValueError("max_response_bytes must be positive.")
         self._timeout = timeout
         self._max_response_bytes = max_response_bytes
-        self._opener = opener if opener is not None else build_opener(_HttpsOnlyRedirectHandler())
+        if opener is not None:
+            self._opener = opener
+        else:
+            ssl_context = ssl.create_default_context(cafile=certifi.where())
+            self._opener = build_opener(
+                _HttpsOnlyRedirectHandler(),
+                HTTPSHandler(context=ssl_context),
+            )
 
     def __call__(self, url: str) -> bytes:
         if not _is_absolute_https_url(url):

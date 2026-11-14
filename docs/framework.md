@@ -4,7 +4,7 @@
 
 MarketPulse India is a planned daily market-intelligence and reporting application focused on Indian markets, especially NSE and BSE. Its intended purpose is to assemble relevant market information into useful morning and evening views, with PDF reports and a Streamlit dashboard.
 
-**Implemented foundation:** the repository contains a Python package, immutable settings, a read-only Kotak Neo provider wrapper, and unit tests. The reporting, dashboard, ingestion, and analytics capabilities described below are planned and are not yet implemented.
+**Implemented foundation:** the repository contains a Python package, immutable settings, a read-only Kotak Neo provider wrapper, and an instrument-master acquisition, storage, parsing, lookup, and quality-reporting path. General market analytics, report generation, and the Streamlit dashboard remain planned.
 
 ## 2. Project objectives
 
@@ -77,7 +77,7 @@ marketpulse-india/
 └── pyproject.toml
 ```
 
-The `analytics` and `dashboard` packages currently contain only package initializers; `reports` likewise has no report implementation. No instrument data or application-managed data directories are currently present.
+The `analytics` and `dashboard` packages currently contain only package initializers; `reports` likewise has no report implementation. A locally retained NSE Cash instrument snapshot may be present under the Git-ignored `data/instruments/` directory; the real-data tests skip when that local snapshot is unavailable.
 
 ## 7. Application architecture and module responsibilities
 
@@ -85,12 +85,16 @@ The `analytics` and `dashboard` packages currently contain only package initiali
 
 - `marketpulse.config.settings`: frozen `Settings` dataclass, environment-backed configuration, project root, and derived `data_dir` and `instrument_dir` paths.
 - `marketpulse.data.kotak_neo`: a thin Kotak Neo SDK wrapper exposing scrip master, instrument search, quotes, and historical data methods. It forwards calls and leaves response interpretation to future layers.
-- `tests`: `unittest` coverage for settings and wrapper behavior, using mocks rather than live broker calls.
+- `marketpulse.data.instrument`: source-neutral instrument model populated from the current Kotak CSV field mapping.
+- `marketpulse.data.instrument_parser`: CSV structure and required-field parsing for instrument master records.
+- `marketpulse.data.instrument_acquirer` and `marketpulse.data.instrument_store`: bounded HTTPS acquisition and application-managed, atomic CSV storage by exchange segment.
+- `marketpulse.data.instrument_service`: instrument loading and exact symbol lookups, plus `get_quality_report()` integration.
+- `marketpulse.data.instrument_quality`: standalone quality reporting for dataset distributions and field completeness, duplicate identifiers, lot-size observations using `Decimal`, and original `pInstType` source-column values. It reports observations without rejecting records.
+- `tests`: `unittest` coverage for these modules, including integration against the local NSE Cash snapshot when available. The current suite has 94 passing tests.
 
 **Planned:**
 
 - Provider adapters for external market information.
-- Instrument-master storage and lookup services.
 - Data normalization and market-data processing.
 - Analytics for indices, securities, sectors, breadth, flows, and other report sections.
 - A Streamlit presentation layer.
@@ -112,9 +116,9 @@ Settings are frozen after construction. `project_root` is derived from the setti
 
 ## 9. Data storage principles
 
-Basic application-managed instrument master CSV storage is implemented through `InstrumentMasterStore`. CSV files are stored by exchange segment under `data/instruments/`. The store validates CSV structure before saving and uses atomic replacement so an invalid or interrupted replacement does not corrupt an existing valid file.
+Instrument-master CSV acquisition and application-managed storage are implemented through `InstrumentMasterAcquirer` and `InstrumentMasterStore`. The acquirer uses a bounded HTTPS downloader with certifi-backed TLS; the store validates CSV structure and atomically saves files by exchange segment under `data/instruments/`. The retained `nse_cm.csv` snapshot is local and Git-ignored. `InstrumentMasterService.get_quality_report()` parses a stored file and reports dataset distributions, completeness, duplicate identifiers, lot-size observations, and the source `pInstType` distribution without rejecting records.
 
-Downloading instrument masters, refresh scheduling, freshness validation, and historical retention are still planned. Keep source and retrieval-time context where appropriate, and do not assume the Kotak SDK's own cache is the application's managed instrument store. Any future storage choices should preserve these principles and avoid silently overwriting valid data with invalid or partial input.
+Refresh scheduling, freshness validation, and historical retention are still planned. Keep source and retrieval-time context where appropriate, and do not assume the Kotak SDK's own cache is the application's managed instrument store. The real-data integration test is optional when the local ignored snapshot is absent; it does not pin a record count or value distributions.
 
 ## 10. Security and broker integration principles
 
