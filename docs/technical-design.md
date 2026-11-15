@@ -2,147 +2,152 @@
 
 ## Status labels
 
-- **Confirmed:** verified from the existing project or SDK inspection.
-- **Implemented:** actually present in the repository.
-- **Proposed:** intended design, not implemented yet.
-- **Open Question:** requires a future decision or verification.
+- **Implemented:** present in the application and covered by local tests.
+- **Live-verified:** the relevant Kotak read-only REST behavior has also been manually exercised.
+- **Deferred:** intentionally outside the current completed milestone.
+- **Future plan:** intended follow-up work, not implemented yet.
 
-## 1. System architecture overview
+## 1. Architecture overview
 
-**Proposed:** MarketPulse India will follow a local-first, layered design. Provider adapters retrieve data, processing validates and normalizes it, analytics derives report-ready measures, and dashboard/report components present the results. Configuration and storage paths are shared through a small settings layer.
-
-**Implemented:** the current codebase remains a foundation rather than an end-to-end market-intelligence application. The instrument-master path connects acquisition, application-managed storage, parsing, lookup, and quality reporting; no general market-data fetch-to-report pipeline connects other data sources to reports or a dashboard.
-
-## 2. High-level component architecture
+MarketPulse India is a local-first Python application with a Streamlit dashboard. Kotak Neo REST calls are isolated behind `KotakNeoProvider`; service classes resolve instruments and validate provider responses; immutable source-neutral models carry validated values; dashboard orchestration controls retrieval, caching and error state; Streamlit code renders those results.
 
 ```text
-                         ┌────────────────────────┐
-                         │ Configuration / Settings│
-                         └───────────┬────────────┘
-                                     │
-                                     ▼
-┌──────────────────┐    ┌─────────────────────────┐
-│ Data providers   │───▶│ Processing and validation│
-└──────────────────┘    └────────────┬────────────┘
-                                     ▼
-                           ┌──────────────────┐
-                           │ Analytics        │
-                           └───────┬──────────┘
-                                   ▼
-                    ┌──────────────┴──────────────┐
-                    ▼                             ▼
-          ┌──────────────────┐          ┌──────────────────┐
-          │ Streamlit dashboard│          │ Report generation│
-          └──────────────────┘          └──────────────────┘
+Settings ──▶ KotakNeoProvider ──▶ data services ──▶ validated models
+                                      ▲                  │
+                                      │                  ▼
+                      instrument store/parser     dashboard orchestration
+                                                         │
+                                                         ▼
+                                                   Streamlit rendering
+                                                         │
+                                              future report-model boundary
 ```
 
-**Implemented:** instrument-master acquisition, storage, lookup, and quality reporting support the provider/processing boundary. **Proposed:** manual and scheduled runs should invoke the same broader application workflow to avoid divergent behavior.
+Business rules are outside Streamlit widgets. The dashboard does not call the SDK during rendering or on ordinary reruns. PDF/report composition, persistence of report history, and scheduling are not present; future report code should consume service results and their coverage/retrieval metadata rather than access the provider directly.
 
-## 3. Component responsibilities
+## 2. Configuration and Kotak provider
 
-### Configuration
+**Implemented:** `config/settings.py` provides frozen settings, project/data paths, and environment-backed `KOTAK_CONSUMER_KEY` and `KOTAK_ENVIRONMENT`. `data/kotak_neo.py` wraps the installed `kotakneoapi==3.0.13` SDK and exposes the application's read-only scrip-master, instrument-search, quote, and historical-data adapter methods. Services validate returned shapes and values. The application does not use trade login, TOTP/MPIN, WebSocket/SFeed, order or trading operations.
 
-**Implemented:** `Settings` is a frozen dataclass providing application name/version, `MARKETPULSE_ENV`, Kotak consumer-key/environment configuration, the project root, and derived data paths. No settings loader creates directories or validates live credentials.
+Provider calls are mockable through injected clients. Tests do not require credentials or live requests. Dashboard-facing failure messages are sanitized rather than displaying provider payloads or sensitive exception text.
 
-### Data providers
+## 3. Instrument-master acquisition and lookup
 
-**Implemented:** `KotakNeoProvider` wraps four client methods: `get_scrip_master`, `search_instruments`, `get_quotes`, and `get_historical_data`. It accepts an injected client for tests; otherwise it checks for a consumer key and constructs `NeoAPI` with consumer key and environment. It forwards SDK results without imposing a response schema.
+**Implemented:**
 
-**Proposed:** other sources (for example news, corporate announcements, global markets, commodities, and currency data) should be encapsulated in separate adapters selected according to availability, licensing, and freshness needs.
+- `data/instrument_acquirer.py` obtains a segment-specific file location from the provider, downloads it through the bounded HTTPS downloader with TLS verification, and saves it through the store.
+- `data/instrument_store.py` stores segment snapshots as `data/instruments/<segment>.csv`, validates CSV structure, and uses atomic replacement.
+- `data/instrument_parser.py` validates headers/rows and maps known Kotak fields to the source-neutral `Instrument` model.
+- `data/instrument_service.py` loads parsed instruments and supports exact symbol/trading-symbol lookup and quality reporting.
+- `data/instrument_quality.py` reports structure and field-quality observations without rewriting or silently rejecting unusual source values.
 
-### Instrument master service
+The master acquisition flow is explicit. It is not run by the dashboard's refresh button. Local files such as `nse_cm.csv`, `mcx_fo.csv`, and `cde_fo.csv` are ignored data snapshots, not tracked application source. Their freshness is not automatically established.
 
-**Implemented:** `InstrumentMasterAcquirer` obtains a segment-specific HTTPS location through the provider, uses the bounded certifi-TLS downloader, decodes UTF-8 CSV, and passes it to the store. `InstrumentMasterStore` saves and loads CSV text by exchange segment under `settings.instrument_dir`, using `<segment>.csv` filenames. It validates segment names against path traversal and basic CSV structure, preserves input text and headers, and uses atomic replacement. It does not fetch data itself or validate freshness.
+The NIFTY 100 universe is read from `data/constituents/ind_nifty100list.csv`. Market-movers constituent resolution validates the CSV records and resolves exact symbol, EQ series, expected `-EQ` trading symbol, ISIN, cash segment, and unique token against the local NSE Cash master. A missing or malformed file or ambiguous resolution fails closed.
 
-**Implemented:** `InstrumentMasterParser` maps the required and recognized optional Kotak columns into the source-neutral `Instrument` model and rejects malformed structure or missing required headers/values. `InstrumentMasterService` loads and parses instruments and supports exact symbol lookups. Its `get_quality_report(exchange_segment)` loads the CSV once, parses it with the existing parser, extracts original `pInstType` values with the standard-library CSV reader, and passes both aligned inputs to `InstrumentMasterQualityReporter`. A missing `pInstType` column produces a clear `ValueError`; ordinary instrument loading remains independent of that source column.
+## 4. Quote models and services
 
-**Implemented:** `InstrumentMasterQualityReporter` is a standalone, non-rejecting reporter. It reports total records; exchange- and market-segment distributions; required and optional field completeness; duplicate tokens, symbols, trading symbols, and ISINs; lot-size distributions and numeric zero/negative observations using `Decimal`; series distribution; and blank counts/distribution for source `pInstType` values. Blank identifiers are excluded from duplicate counts. It preserves unusual lot-size strings and does not infer undocumented Kotak field meanings.
+### NSE cash equity quotes
 
-**Implemented:** the local NSE Cash snapshot is kept under Git-ignored `data/instruments/nse_cm.csv`. Real-data regression and service integration tests use it when available, skip when absent, and avoid pinning its record count or distributions. At the 6M documentation update, the complete unittest suite has 94 passing tests.
+`data/quote.py` defines the immutable `Quote`; `data/quote_service.py` implements `NSEEquityQuoteService`. Single-symbol and batch lookups use `InstrumentMasterService` and `nse_cm`. Batch requests resolve the master once and use one `quote_type="all"` provider request. This backend remains reusable and tested, although the original fixed eight-stock watchlist has been removed from active dashboard and planned daily-report scope. Its service implementation and tests remain in the repository.
 
-### Market data processing
+Some equity response fields are intentionally unavailable in the normalized model: previous close and cumulative session volume are not inferred from unverified `ohlc.close` or `last_volume` semantics.
 
-**Proposed:** processing should perform source-aware validation, timestamp handling, normalization, and missing-data reporting. It should preserve provenance and avoid assuming common field names across providers. Pandas and CSV are candidate tools/formats where they fit the data shape.
+### Indices
 
-### Analytics
+`data/index_quote.py` and `data/index_quote_service.py` map supported display names to verified case-sensitive Kotak identifiers and exchanges. One request can retrieve the requested indices. Identity is matched by identifier and exchange; LTP is parsed as `Decimal`; results follow requested order.
 
-**Proposed:** analytics should calculate report inputs such as index/stock moves, sector summaries, and market breadth from validated inputs, and clearly indicate when source coverage is incomplete. FII/DII, news, corporate announcements, global markets, commodities, and currencies may require separate providers and definitions.
+The six dashboard indices are NIFTY 50, NIFTY BANK, NIFTY IT, NIFTY MIDCAP 100, NIFTY SMALLCAP 100, and SENSEX. The service has been live-verified for this set. It does not derive change or volume values.
 
-### Dashboard
+### Sector performance
 
-**Proposed:** a Streamlit application should provide a concise overview, detailed views, timestamps/freshness, and links to generated reports. It should call application services rather than query provider SDKs directly. No dashboard screens exist yet.
+`data/sector_performance.py` and `data/sector_performance_service.py` model and retrieve twelve ordered NSE sectors in one `quote_type="all"` REST batch. The service matches exact `exchange_token` plus `exchange`, not provider-formatted `display_symbol`; it requires all twelve records and finite index-value and percentage-change decimals. It preserves positive, negative, and zero changes and returns defined display order.
 
-### Reports
+Kotak's observed `lstup_time` value was a 1900 placeholder. It is discarded. The service records its own retrieval time and does not claim that it is the exchange's trading timestamp.
 
-**Proposed:** report generation should compose a dated report model from validated data and analytics, render a human-readable document, and optionally export it as PDF. Manual and scheduled invocation should share this same path. No templates or PDF generation code exist yet.
+### NIFTY 100 market movers and 52-week highs
 
-## 4. Kotak Neo integration
+`data/market_movers_service.py` defines the NIFTY 50 and NIFTY 100 universe metadata and shared constituent resolution and quote batching. Each provider request is capped at 25 NSE Cash instruments. The NIFTY 100 requires exactly 100 validated constituents and uses four requests. Each response is checked for exact expected token coverage, uniqueness, exchange and trading identity, and valid finite quote values. Partial results do not produce a ranking.
 
-- **Confirmed:** project metadata pins `kotakneoapi==3.0.13`; the installed environment reports SDK version 3.0.13.
-- **Implemented:** the current wrapper is in `app/marketpulse/data/kotak_neo.py`. Its four exposed operations are scrip master, instrument search, quotes, and historical data. It passes through return values and does not define normalized result schemas.
-- **Implemented:** if it constructs the SDK client, it requires `KOTAK_CONSUMER_KEY` and passes that value plus `KOTAK_ENVIRONMENT` to `NeoAPI`. Tests can inject a client and avoid SDK construction.
-- **Confirmed:** SDK inspection shows the scrip-master operation makes a request using the consumer key in an Authorization header and returns metadata or a segment-specific file path depending on the call. The SDK's `search_scrip` path downloads CSV content for a requested segment, reads it with Pandas, and caches the downloaded bytes locally by segment and calendar day. Its default cache directory is `~/.kotak_neo/scrip_cache`; `NEO_SCRIP_CACHE_DIR` can override it. Stale files for that segment are removed when a new day's cache is written.
-- **Implemented:** the application wrapper contains no TOTP/MPIN login flow and no trade-token validation. It exposes no trading or order-related methods.
-- **Open Question:** live consumer-key-only access has not yet been verified by this project. No live API call or SDK client initialization has been performed for this documentation.
-- **Open Question:** confirm access requirements for quotes and historical data in the intended Kotak account/environment before relying on them. The wrapper itself does not establish a live authenticated session.
+`analytics/market_movers.py` provides provider-independent deterministic ranking. Gainers are ordered by percentage change descending, losers ascending, with deterministic symbol tie-breaking. The result includes universe, expected and validated counts, full-coverage status, retrieval time, and validated quote records.
 
-The SDK may include order-related APIs, but the application design must not expose or invoke them.
+`data/year_high_service.py` applies `LTP >= year_high`, validates a complete 100-stock quote set, sorts qualifiers alphabetically, and returns at most ten. It may correctly return zero stocks. It does not fill the list with stocks merely near their high. The model does not carry percentage change, so the dashboard does not display a percentage for this panel.
 
-## 5. Instrument master design
+The dashboard obtains the four validated quote batches once and passes the same batches to both services. This keeps market movers and the 52-week scan aligned to the same fetched snapshot and avoids eight instead of four REST quote calls. If shared acquisition fails, both NIFTY 100 sections retain their prior cached snapshots or show unavailable; other dashboard datasets continue independently.
 
-- **Confirmed:** the SDK's `scrip_master` method retrieves scrip-master metadata and can return a file path for a requested exchange segment. The SDK's search implementation obtains segment CSV bytes, uses Pandas to parse them, and caches its own copy locally for the calendar day. This SDK-managed cache is separate from application storage.
-- **Implemented:** application-managed CSV text is stored under the configured `data/instruments/` location, with separate `<segment>.csv` files. Storage validates CSV structure and atomically replaces the matching segment file only after validation.
-- **Implemented:** the store preserves the provided CSV text and header names without field normalization. It does not create storage directories until a save is requested.
-- **Implemented:** segment-specific files can be acquired over HTTPS and saved through the application store. The current flow does not attach retrieval timestamps or validate freshness.
-- **Proposed:** add a separate mapping/normalization layer only when verified fields and downstream needs are known.
-- **Open Question:** determine refresh cadence, retention/history policy, cache invalidation behavior, and whether the application should reuse SDK-discovered files or download/own its own copies.
-- **Confirmed:** the locally retained NSE Cash snapshot contains the columns consumed by the current Kotak parser, including `pSymbol`, `pExchSeg`, `pSymbolName`, and `pTrdSymbol`. The parser maps only its known columns; remaining provider fields are not assigned undocumented semantics.
+Both services have been live-verified with Kotak market data. Provider/data failures and incomplete coverage are surfaced through sanitized dashboard states.
 
-## 6. Market data processing architecture
+### MCX Gold, Silver and Crude Oil futures
 
-**Proposed:** a pipeline should have explicit stages: acquire provider response, attach retrieval context, validate source result, parse into a source-aware representation, normalize only verified common concepts, compute analytics inputs, and report completeness/freshness. Failures should be visible to downstream reports rather than silently interpreted as zero or unchanged values.
+`data/commodity_futures_quote.py` provides the common source-neutral `CommodityFuturesQuote` model. `data/commodity_futures_quote_service.py` shares MCX CSV normalization, contract selection, quote identity checks, and finite `Decimal` parsing. The Gold, Silver, and Crude Oil service classes configure the standard commodity symbol and verified quotation unit:
 
-**Implemented:** a general multi-source ingestion and analytics pipeline does not yet exist. Instrument-master acquisition and quality reporting are implemented as a focused path; the provider wrapper continues to forward SDK calls without defining normalized market-data schemas.
+| Contract | Selection | Quotation unit |
+| --- | --- | --- |
+| Standard MCX GOLD futures | `mcx_fo`, `pSymbolName=GOLD`, `pInstType=FUTCOM` | INR per 10 grams |
+| Standard MCX SILVER futures | `mcx_fo`, `pSymbolName=SILVER`, `pInstType=FUTCOM` | INR per kg |
+| Standard MCX CRUDEOIL futures | `mcx_fo`, `pSymbolName=CRUDEOIL`, `pInstType=FUTCOM` | INR per barrel |
 
-## 7. Proposed dashboard architecture
+CSV header whitespace is trimmed. The valid futures `pOptionType=XX` is retained. `lExpiryDate` is interpreted using the verified MCX Unix-seconds representation; the nearest eligible unexpired contract is dynamically selected and one `quote_type="all"` request is made. The timestamp used for selection is retained in the model. It must not be automatically presented as the official contract calendar expiry date.
 
-**Proposed:** Streamlit pages or sections should consume application services/use cases and display the latest available report inputs, source timestamps, and availability state. Keep page code focused on presentation. Avoid making broker requests independently from page rendering; a service layer should control fetching and error handling. No Streamlit dependency or dashboard implementation is present in the current project configuration.
+The services require matching returned token and `mcx_fo` exchange, finite positive LTP, and finite change and percentage change. Optional OHLC open/high/low are parsed when valid. `ohlc.close` is not treated as prior-session close. The observed 1900 placeholder `lstup_time` is not used as a market timestamp. Gold, Silver, and Crude Oil quote paths have passed controlled live verification.
 
-## 8. Proposed morning and evening report generation flow
+### USD/INR currency futures
 
-**Proposed morning flow:** trigger a manual run or future scheduled run; gather available pre-market inputs; validate and timestamp them; calculate summaries; render a morning report model; produce a PDF; save the result and run metadata for later display.
+`data/currency_futures_quote.py` defines a source-neutral currency futures model; `data/usdinr_futures_quote_service.py` selects the nearest eligible USDINR `FUTCUR` contract from the local `cde_fo` master and makes one REST quote request. It applies the verified cde_fo expiry conversion, validates identity and finite decimal prices/changes, and records expiry and retrieval timestamps separately. The quotation is INR per USD and is a USD/INR currency futures price, not a spot exchange rate or RBI reference rate. The provider's observed weekend timestamp is not treated as proof of current market freshness. The quote path has passed controlled live verification.
 
-**Proposed evening flow:** trigger a manual or scheduled run after session close; gather available end-of-day inputs; validate and timestamp them; calculate market and breadth summaries; render an evening report model; produce a PDF; save the result and run metadata.
+### Indicative Crude Oil USD equivalent
 
-Both flows should tolerate optional-source failures and mark missing sections clearly. No report models, PDF files, persistence, or report workflows are implemented.
+`analytics/currency_conversion.py` computes `Crude Oil INR per barrel / USDINR futures INR per USD` using `Decimal`, rounded to two decimal places with `ROUND_HALF_UP`. Dashboard formatting uses already-loaded session-state quotes and does not make another provider request. Both inputs must be positive finite values. The displayed label identifies the value as an indicative USD/barrel equivalent and names currency futures as the conversion basis. It is not a WTI or Brent price, and freshness is not independently verified.
 
-## 9. Proposed scheduling approach
+## 5. Dashboard orchestration, caching, and failure handling
 
-**Proposed:** start with a local scheduler or operating-system scheduler invoking the same command/use case used by manual runs. Make runs idempotent for a given report date/session, define market-calendar and timezone behavior, and persist run outcomes. Select a scheduler only after operational needs are known.
+`dashboard/market_data.py` contains the `DashboardMarketData` snapshot, service construction, refresh orchestration, validation, presentation models, and safe error mapping. `dashboard/app.py` defines the Streamlit layout and presentation.
 
-**Open Question:** choose the scheduling mechanism, holiday-calendar source, retry policy, and behavior when the machine is offline at a scheduled time. No scheduler is currently configured.
+On normal Streamlit reruns, session state is rendered without creating provider services or making requests. **Refresh Market Data** creates the services and refreshes indices, Gold, Silver, USD/INR, Crude Oil, sectors, market movers, and 52-week highs. Successful values replace their respective session-state snapshot. A failed dataset keeps its previous successful value and original retrieval time; UI labels identify cached data. Failures in independent sections do not prevent others from updating. NIFTY 100 movers/highs share their acquisition and quote batches as described above.
 
-## 10. Error handling and logging principles
+The dashboard includes six index rows, four commodity/currency cards, a twelve-tile sector heatmap, NIFTY 100 gainers/losers tables, and the NIFTY 100 52-week-high results. Tiles and tables show signed values as well as color; unavailable or incomplete snapshots are not presented as complete. The original fixed eight-stock watchlist section and its refresh request are absent. No PDF composition code currently includes that watchlist.
 
-**Proposed:** distinguish configuration errors, provider/network failures, invalid or stale data, processing failures, and output failures. Include source, operation, and run context in logs while redacting credentials and sensitive values. Reports should show data freshness and partial availability. Use bounded retries only for suitable transient failures and avoid retries that violate provider limits.
+Retrieval times are retained separately from provider timestamp fields and rendered in `Asia/Kolkata` as **Retrieved at**. Kotak timestamps that are placeholders or have unverified meaning are not presented as exchange times. The dashboard discloses that market-data freshness is not independently verified.
 
-**Implemented:** the wrapper raises `KotakConfigurationError` when a consumer key is absent before constructing the SDK client. It otherwise forwards SDK behavior without application-level error mapping or logging policy.
+## 6. Tests and verification status
 
-## 11. Security considerations
+Tests use Python `unittest`, fixtures, and mocks for provider and service behavior. They cover instrument parsing/acquisition/storage, equity and index quote validation, NIFTY 50/100 coverage and batching, sector data, futures selection and quote validation, currency conversion, dashboard formatting, refresh/caching, independent failures, and safe unavailable states. The standard test command is:
 
-- **Implemented:** the consumer key is read from `KOTAK_CONSUMER_KEY`; it is not hard-coded in the provider module.
-- **Proposed:** keep credentials out of source control, logs, generated reports, and exception text. Limit access to any local secret configuration and data containing account-specific information.
-- **Proposed:** preserve the read-only boundary through interfaces, tests, and code review. Do not add order placement, modification, cancellation, or automated trading flows.
-- **Confirmed:** this project has not verified live consumer-key-only access. The existence of an SDK method does not by itself establish account authorization or production availability.
-- **Proposed:** validate third-party inputs and avoid logging raw payloads if they may contain sensitive information.
+```bash
+.venv/bin/python -m unittest discover -s tests -v
+```
 
-## 12. Open technical questions
+The latest reported milestone verification is:
 
-- **Open Question:** Which authoritative sources and licenses will cover news, corporate announcements, FII/DII data, global markets, commodities, and currency data?
-- **Open Question:** What data freshness and retention guarantees are required for reports and dashboard history?
-- **Open Question:** What exact Kotak segment files, fields, and date semantics are available to the intended account?
-- **Open Question:** Which quote and historical-data calls can be made before or without a completed 2FA session in the target setup?
-- **Open Question:** Should generated reports and snapshots remain local CSV/files, or is a database needed for the initial product?
-- **Open Question:** Which PDF rendering approach and report template format best fit the intended output?
-- **Open Question:** Which local scheduler and market-calendar source should govern report timings, holidays, and missed runs?
-- **Open Question:** What Streamlit page structure and report-history UX are needed for the first usable release?
+- Full `unittest` suite: 240 passed.
+- `git diff --check`: passed.
+- Streamlit application import: passed.
+- Full browser verification: 10/10 checks passed.
+
+These are the reported checks for the completed dashboard milestone. This documentation-only update does not rerun them and does not claim additional validation.
+
+## 7. Security and operational boundaries
+
+- Keep `KOTAK_CONSUMER_KEY` outside source control and out of logs, dashboard output, and reports.
+- Keep provider access behind `KotakNeoProvider` and service validation; do not pass complete raw quote payloads into presentation code.
+- The application is read-only. No orders, trading, trade-enabled login, TOTP/MPIN, or WebSocket/SFeed operations belong in this integration.
+- There are no automatic retries, background schedules, or dashboard-triggered instrument-master downloads.
+- Local constituent and instrument-master snapshots have no dashboard-managed refresh cadence or freshness guarantee.
+
+## 8. Report integration boundary and roadmap
+
+**Implemented boundary:** quote services return validated models with source, retrieval time, instrument identity and, where applicable, universe coverage. Dashboard orchestration consumes those models. The fixed initial eight-stock watchlist is excluded from active dashboard and future daily-report scope; its reusable backend service and tests remain.
+
+**Next milestone — PDF market reports:** introduce a source-neutral report model and composition layer that consumes service results, coverage status, and retrieval metadata. PDF rendering should read the composed model and must not make provider requests. Morning/evening scheduling and report history can follow after report composition and freshness policy are defined.
+
+**Deferred:** FII/FPI and DII activity. No institutional-flow dataset is currently integrated. It must not be approximated by combining sources with different reporting periods or provisional/final definitions.
+
+## 9. Explicit limitations
+
+1. Provider timestamps can be placeholders or lack verified semantics; retrieval time is not an exchange timestamp.
+2. USD/INR is a currency futures quote, not spot or RBI reference data.
+3. The indicative Crude Oil USD equivalent is not a WTI or Brent quote and inherits the freshness limitations of both source prices.
+4. Stored futures expiry timestamps support eligibility/selection but are not automatically official expiry calendar dates.
+5. NIFTY 100 52-week-high results require full-universe quote coverage and use `LTP >= reported year_high`; a complete result can contain zero stocks.
+6. The dashboard does not establish freshness guarantees for local constituent or instrument-master files.
+7. FII/DII, PDF generation, report scheduling, and report history are deferred or future work.

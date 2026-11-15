@@ -7,7 +7,7 @@ name = "marketpulse-india"
 version = "0.1.0"
 description = "Daily intelligence and reporting for Indian stock markets."
 requires-python = ">=3.13,<3.14"
-dependencies = ["kotakneoapi==3.0.13", "certifi"]
+dependencies = ["kotakneoapi==3.0.13", "certifi", "streamlit"]
 
 [project.optional-dependencies]
 dev = ["pytest"]

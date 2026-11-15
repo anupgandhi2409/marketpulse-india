@@ -1,168 +1,100 @@
 # MarketPulse India – Technical Framework Guide
 
-## 1. Project overview and purpose
+## 1. Project purpose and current scope
 
-MarketPulse India is a planned daily market-intelligence and reporting application focused on Indian markets, especially NSE and BSE. Its intended purpose is to assemble relevant market information into useful morning and evening views, with PDF reports and a Streamlit dashboard.
+MarketPulse India is a local-first market dashboard and reporting application for Indian markets. Its current product surface is a read-only Streamlit dashboard backed by Kotak Neo REST market data. The next milestone is to compose the validated data into morning and evening PDF market reports.
 
-**Implemented foundation:** the repository contains a Python package, immutable settings, a read-only Kotak Neo provider wrapper, and an instrument-master acquisition, storage, parsing, lookup, and quality-reporting path. General market analytics, report generation, and the Streamlit dashboard remain planned.
+The dashboard currently covers six market indices, twelve NSE sector indices, NIFTY 100 gainers and losers, NIFTY 100 stocks at their reported 52-week highs, MCX Gold, Silver and Crude Oil futures, and USD/INR currency futures. It also shows an indicative USD equivalent for Crude Oil using the USD/INR futures price. Automated trading, scheduled refresh, FII/DII, and PDF reporting are not implemented.
 
-## 2. Project objectives
+## 2. Technology stack
 
-- Provide a consistent view of Indian market conditions before and after the trading session.
-- Collect market information through clearly separated provider adapters.
-- Turn validated source data into understandable summaries and analysis.
-- Make reports available both on demand and, when scheduled workflows are added, automatically.
-- Keep broker integration read-only and keep credentials outside source control.
-- Preserve a modular foundation that can be developed and tested locally.
+| Area | Implemented technology |
+| --- | --- |
+| Runtime | Python 3.13 (`>=3.13,<3.14`) |
+| Market-data provider | Kotak Neo SDK 3.0.13, wrapped by `KotakNeoProvider` |
+| Dashboard | Streamlit |
+| Instrument files | Standard-library CSV parsing and local CSV storage |
+| Numeric market values | `Decimal` |
+| Tests | Python `unittest`; `pytest` is an optional development dependency |
 
-## 3. Functional scope
+Project dependencies are declared in `pyproject.toml`. The current runtime dependencies include `kotakneoapi==3.0.13`, `certifi`, and `streamlit`.
 
-The intended product scope includes:
+## 3. Application architecture
 
-- NSE and BSE market intelligence.
-- Morning pre-market reports and evening post-market reports.
-- PDF report generation, initiated manually or through a future schedule.
-- A Streamlit dashboard.
-- Coverage for market indices, stocks, sectors, market breadth, FII/DII activity, news, corporate announcements, global markets, commodities, and currencies.
-
-These are product requirements, not claims that the corresponding pipelines or screens exist today. Data availability and licensing will need to be established for each source and category.
-
-## 4. Explicit exclusions
-
-- No automated trading.
-- No order placement, modification, or cancellation.
-- No WhatsApp notifications in the initial scope.
-- No cloud deployment requirement in the initial scope; local development is the starting point.
-
-## 5. Technology stack
-
-| Area | Current or intended choice | Status |
-| --- | --- | --- |
-| Runtime | Python 3.13 (`>=3.13,<3.14`) | Configured |
-| Dashboard | Streamlit | Planned |
-| Broker SDK | Kotak Neo SDK 3.0.13 (`kotakneoapi==3.0.13`) | Dependency configured; wrapper implemented |
-| Data handling | Pandas and CSV where appropriate | Intended; no application pipeline yet |
-| Tests | `unittest` currently; `pytest` configured as a development dependency | Test suite implemented; pytest is optional dev dependency |
-
-The project metadata currently declares the Kotak SDK as its runtime dependency and `pytest` in the `dev` optional dependency group. The tests presently use Python's `unittest` framework. Pandas and Streamlit are not declared project dependencies in the current configuration.
-
-## 6. Current project structure
-
-The following reflects the repository today; package directories other than the concrete modules shown are foundations or placeholders.
+The code separates provider access, local instrument data, validation and source-neutral quote models, dashboard orchestration, and rendering:
 
 ```text
-marketpulse-india/
-├── app/
-│   └── marketpulse/
-│       ├── __init__.py
-│       ├── analytics/
-│       │   └── __init__.py
-│       ├── config/
-│       │   ├── __init__.py
-│       │   └── settings.py
-│       ├── dashboard/
-│       │   └── __init__.py
-│       ├── data/
-│       │   ├── __init__.py
-│       │   └── kotak_neo.py
-│       └── reports/
-│           └── __init__.py
-├── tests/
-│   ├── __init__.py
-│   ├── test_kotak_neo.py
-│   └── test_settings.py
-├── docs/
-│   ├── framework.md
-│   └── technical-design.md
-└── pyproject.toml
+KotakNeoProvider ──▶ quote and market-data services ──▶ dashboard market-data models
+       ▲                         ▲                                  │
+       │                         │                                  ▼
+Settings / credentials    instrument services                Streamlit rendering
+                              ▲
+                              │
+                    local segment CSV files
 ```
 
-The `analytics` and `dashboard` packages currently contain only package initializers; `reports` likewise has no report implementation. A locally retained NSE Cash instrument snapshot may be present under the Git-ignored `data/instruments/` directory; the real-data tests skip when that local snapshot is unavailable.
+`app/marketpulse/data/kotak_neo.py` is a thin read-only SDK adapter. Services resolve instruments, validate response identities and values, and return models that do not expose SDK response objects to the dashboard. `app/marketpulse/dashboard/market_data.py` builds the services, coordinates refreshes, retains successful snapshots, and prepares validated presentation values. `app/marketpulse/dashboard/app.py` renders the Streamlit interface.
 
-## 7. Application architecture and module responsibilities
+## 4. Current market-data capabilities
 
-**Implemented:**
+- **Indices:** six verified REST indices: NIFTY 50, NIFTY BANK, NIFTY IT, NIFTY MIDCAP 100, NIFTY SMALLCAP 100, and SENSEX.
+- **Sector performance:** one REST batch for twelve ordered NSE sector indices, with index values and percentage changes. The observed provider `lstup_time` placeholder is not used as market time.
+- **NIFTY 100 market movers:** the top ten gainers and losers from validated `per_change` values, with full-universe coverage required.
+- **NIFTY 100 52-week highs:** up to ten stocks for which LTP is greater than or equal to Kotak's reported `year_high`. A complete scan may return zero stocks; stocks merely near the high are not included.
+- **Futures:** dynamically selected active standard MCX GOLD, SILVER and CRUDEOIL futures, plus USDINR currency futures. Contracts are selected from local master metadata rather than fixed tokens.
+- **Indicative Crude Oil conversion:** Crude Oil INR per barrel divided by USD/INR futures INR per USD, using `Decimal` and half-up rounding to two decimal places. It is an indicative USD equivalent, not a WTI or Brent quote.
+- **Equity quote backend:** reusable NSE cash equity quote models, instrument lookup, and `NSEEquityQuoteService` remain available. The original fixed eight-stock watchlist is not part of the active dashboard or planned daily reports; its reusable service logic and tests remain in the repository.
 
-- `marketpulse.config.settings`: frozen `Settings` dataclass, environment-backed configuration, project root, and derived `data_dir` and `instrument_dir` paths.
-- `marketpulse.data.kotak_neo`: a thin Kotak Neo SDK wrapper exposing scrip master, instrument search, quotes, and historical data methods. It forwards calls and leaves response interpretation to future layers.
-- `marketpulse.data.instrument`: source-neutral instrument model populated from the current Kotak CSV field mapping.
-- `marketpulse.data.instrument_parser`: CSV structure and required-field parsing for instrument master records.
-- `marketpulse.data.instrument_acquirer` and `marketpulse.data.instrument_store`: bounded HTTPS acquisition and application-managed, atomic CSV storage by exchange segment.
-- `marketpulse.data.instrument_service`: instrument loading and exact symbol lookups, plus `get_quality_report()` integration.
-- `marketpulse.data.instrument_quality`: standalone quality reporting for dataset distributions and field completeness, duplicate identifiers, lot-size observations using `Decimal`, and original `pInstType` source-column values. It reports observations without rejecting records.
-- `tests`: `unittest` coverage for these modules, including integration against the local NSE Cash snapshot when available. The current suite has 94 passing tests.
+FII/FPI and DII institutional activity integration is deferred. No FII/DII figures are included in the dashboard or report scope until a suitable source, definitions, and permitted retrieval method are established.
 
-**Planned:**
+## 5. Local instrument and constituent data
 
-- Provider adapters for external market information.
-- Data normalization and market-data processing.
-- Analytics for indices, securities, sectors, breadth, flows, and other report sections.
-- A Streamlit presentation layer.
-- Report composition, PDF output, and scheduling.
+`InstrumentMasterAcquirer`, `InstrumentMasterStore`, `InstrumentMasterParser`, and `InstrumentMasterService` provide segment-specific acquisition, validation, storage, and lookup. Application-managed instrument files are stored under `data/instruments/` as `<exchange_segment>.csv`; the store validates input and atomically replaces a saved file. Acquisition is explicit and is not a dashboard refresh action.
 
-These responsibilities should remain separated so that provider-specific behavior does not leak into analytics or presentation code.
+The NIFTY 100 services use the local constituent file `data/constituents/ind_nifty100list.csv` and the local NSE Cash master `data/instruments/nse_cm.csv`. MCX futures use `data/instruments/mcx_fo.csv`, and USDINR futures use `data/instruments/cde_fo.csv`. These data files are local and Git-ignored; they are not application source code. NIFTY 100 symbols are validated against exact NSE Cash EQ instruments and their trading symbols, series, ISINs, and unique tokens.
 
-## 8. Configuration and environment variables
+## 6. Dashboard refresh and cached results
 
-The `Settings` dataclass in `app/marketpulse/config/settings.py` reads the following variables when a settings instance is created:
+The dashboard does not fetch market data during ordinary Streamlit reruns. The user starts retrieval with **Refresh Market Data**. Successful results are retained in Streamlit session state with their original retrieval times.
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `MARKETPULSE_ENV` | `development` | Application environment label |
-| `KOTAK_CONSUMER_KEY` | unset (`None`) | Kotak Neo consumer key; required by the provider when it constructs an SDK client |
-| `KOTAK_ENVIRONMENT` | `prod` | Kotak SDK environment value |
+The refresh orchestrator handles indices, commodities and currency, sectors, and the NIFTY 100 panels independently. A dataset failure produces a sanitized unavailable/error state and retains its previous successful snapshot, marked as cached. Other datasets can still refresh. The NIFTY 100 market-movers and 52-week-high panels share the same four validated batches of 25 stock quotes in a refresh, avoiding a second set of requests. If that shared constituent resolution or quote acquisition fails, both NIFTY 100 panels remain on their previous cached snapshots or show unavailable.
 
-Settings are frozen after construction. `project_root` is derived from the settings module path. `data_dir` and `instrument_dir` are computed as `<project_root>/data` and `<project_root>/data/instruments`; these properties do not create directories.
+Dashboard retrieval timestamps are converted for display in India Standard Time and labeled **Retrieved at**. They are not represented as exchange trading timestamps. The dashboard states that market-data freshness is not independently verified.
 
-## 9. Data storage principles
+## 7. Read-only access and credential handling
 
-Instrument-master CSV acquisition and application-managed storage are implemented through `InstrumentMasterAcquirer` and `InstrumentMasterStore`. The acquirer uses a bounded HTTPS downloader with certifi-backed TLS; the store validates CSV structure and atomically saves files by exchange segment under `data/instruments/`. The retained `nse_cm.csv` snapshot is local and Git-ignored. `InstrumentMasterService.get_quality_report()` parses a stored file and reports dataset distributions, completeness, duplicate identifiers, lot-size observations, and the source `pInstType` distribution without rejecting records.
+The application uses Kotak Neo's consumer-key-based REST market-data path through `KotakNeoProvider`. Configuration is read from `KOTAK_CONSUMER_KEY` and `KOTAK_ENVIRONMENT`; credentials are not part of source files. The application adapter does not expose order placement, order management, trade-enabled login, TOTP/MPIN, WebSocket/SFeed, or trading operations. Live market-data access is read-only.
 
-Refresh scheduling, freshness validation, and historical retention are still planned. Keep source and retrieval-time context where appropriate, and do not assume the Kotak SDK's own cache is the application's managed instrument store. The real-data integration test is optional when the local ignored snapshot is absent; it does not pin a record count or value distributions.
+Provider responses are validated at service boundaries. Dashboard-facing errors are mapped to sanitized messages; credentials, raw quote payloads, and provider error details should not be displayed or logged.
 
-## 10. Security and broker integration principles
+## 8. Development status and next milestone
 
-- Keep the provider boundary read-only. The application scope excludes all order and trading operations.
-- Keep consumer keys and future credentials in environment configuration or an appropriately protected secret store; do not commit them.
-- Avoid logging secrets or sensitive account information.
-- Keep SDK calls behind the provider wrapper so tests can inject a mock client.
-- The wrapper's source does not implement TOTP/MPIN login or trade-token validation. Live access behavior has not been verified by this project.
+The Streamlit dashboard and its current market-data panels are implemented. The latest reported local validation is 240 passing `unittest` tests, `git diff --check` passed, and the Streamlit application import passed. A separate full browser verification reported 10/10 checks passed. These are the reported results for the completed dashboard milestone, not a claim that an exchange timestamp or data freshness is guaranteed.
 
-## 11. Testing strategy
+**Next milestone: PDF market-report generation.** The report layer should consume validated service results and retrieval/coverage metadata through a source-neutral report model. It should not call provider APIs from rendering code. Morning and evening scheduling, persistence/history, and any automation remain future work. The fixed eight-stock watchlist is excluded from these planned daily reports. FII/DII remains deferred.
 
-The current tests use `unittest` and mock the SDK constructor/client. They verify settings defaults and overrides, frozen settings, derived paths, missing-key handling, and argument forwarding for provider methods. They do not contact Kotak services. `pytest` is configured as a development dependency, but the present suite is written with `unittest`.
+## 9. Data and market interpretation limitations
 
-As features are added, tests should cover transformations, validation, report assembly, and failure paths with fixed sample inputs. Live broker calls should not be required for routine unit tests.
+- Kotak quote timestamps may be placeholders or have unverified meaning. Retrieval time is recorded separately and must not be presented as exchange market time.
+- USD/INR is a currency futures quote, not a spot rate or RBI reference rate.
+- The Crude Oil conversion is an approximate cross-currency equivalent using that futures quote; it is not WTI or Brent.
+- A contract's stored expiry timestamp is used for eligibility and selection. It is not automatically an official calendar expiry date.
+- The 52-week-high scan uses `LTP >= reported year_high`; it may return an empty list when no stock qualifies.
+- Instrument-master and constituent files are local snapshots. Their refresh cadence and freshness are not automated by the dashboard.
+- FII/DII, PDF output, and scheduled report generation are not implemented.
 
-## 12. Local development workflow
+## 10. Local development workflow
 
-1. Use the repository's Python 3.13 virtual environment.
-2. Install the project and development extras only as needed for development.
-3. Configure environment variables locally; keep real credentials out of tracked files.
-4. Run the unit suite with `.venv/bin/python -m unittest discover -s tests -v`.
-5. Keep new work within the existing package layout and add tests around behavior that can be tested without external services.
+Use the repository's Python 3.13 virtual environment. Configure Kotak settings locally and keep credentials out of tracked files. Run the full unit suite with:
 
-There is not yet an application entry point or runnable dashboard.
+```bash
+.venv/bin/python -m unittest discover -s tests -v
+```
 
-## 13. Development principles and architectural decisions
+Launch the dashboard from the project root with:
 
-- Clearly distinguish implemented behavior from proposed features.
-- Keep integrations, processing, analytics, reports, and presentation loosely coupled.
-- Prefer small provider wrappers and dependency injection for testability.
-- Treat external data as untrusted until validated; do not invent undocumented schemas.
-- Start with local operation and avoid adding deployment infrastructure without a product requirement.
-- Maintain a strict read-only broker boundary.
-- Add storage and scheduling only with defined freshness, retry, and recovery behavior.
+```bash
+.venv/bin/streamlit run app/marketpulse/dashboard/app.py
+```
 
-## 14. Glossary
-
-| Term | Meaning |
-| --- | --- |
-| NSE / BSE | National Stock Exchange of India / BSE Ltd. |
-| Instrument master (scrip master) | Provider-supplied reference listing used to identify tradable or quoted instruments; exact fields depend on the provider file. |
-| Exchange segment | A provider-defined market segment such as an equity or derivatives segment. Use SDK-supported values rather than assuming a universal naming scheme. |
-| Market breadth | Summary of advancing, declining, and unchanged securities, subject to data coverage and a defined universe. |
-| FII / DII | Foreign Institutional Investor / Domestic Institutional Investor. |
-| Provider adapter | A module that isolates one external data source behind application-facing methods. |
-| Pre-market report | A summary prepared before the regular trading session. |
-| Post-market report | A review prepared after the regular trading session. |
+Tests use mocks and local fixtures; routine test runs do not make live Kotak requests.
