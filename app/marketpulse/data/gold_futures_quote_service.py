@@ -16,5 +16,5 @@ class GoldFuturesQuoteService(CommodityFuturesQuoteService):
     """Retrieve an active standard MCX Gold futures quote through Kotak Neo."""
 
     COMMODITY = "GOLD"
-    QUOTATION_UNIT = "INR per 10 grams"
+    QUOTATION_UNIT = "₹ per 10 grams"
     QUOTE_MODEL = GoldFuturesQuote

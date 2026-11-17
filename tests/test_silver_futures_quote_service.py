@@ -105,7 +105,7 @@ class SilverFuturesQuoteServiceTests(unittest.TestCase):
         self.assertEqual(result.contract_trading_symbol, "SILVER04DEC26FUT")
         self.assertEqual(result.instrument_token, "700")
         self.assertEqual(result.contract_expiry_timestamp, self.now + timedelta(days=19))
-        self.assertEqual(result.quotation_unit, "INR per kg")
+        self.assertEqual(result.quotation_unit, "₹ per kg")
         self.assertEqual(result.price, Decimal("176309"))
         self.assertEqual(result.absolute_change, Decimal("-2415"))
         self.assertEqual(result.percentage_change, Decimal("-1.3512"))

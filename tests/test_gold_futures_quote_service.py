@@ -106,7 +106,7 @@ class GoldFuturesQuoteServiceTests(unittest.TestCase):
         self.assertEqual(result.price, Decimal("136705"))
         self.assertEqual(result.absolute_change, Decimal("480"))
         self.assertEqual(result.percentage_change, Decimal("0.3524"))
-        self.assertEqual(result.quotation_unit, "INR per 10 grams")
+        self.assertEqual(result.quotation_unit, "₹ per 10 grams")
 
     def test_expired_and_non_futures_are_not_selected(self):
         """Ignore expired contracts, options, and other Gold product variants."""

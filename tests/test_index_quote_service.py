@@ -1,5 +1,6 @@
 import unittest
 from decimal import Decimal
+from datetime import datetime, timezone
 from unittest.mock import Mock
 
 from marketpulse.data.index_quote import IndexQuote
@@ -60,6 +61,72 @@ class IndexQuoteServiceTests(unittest.TestCase):
         self.assertEqual(quotes[0], IndexQuote(
             "SENSEX", "BSE", "Kotak Neo", Decimal("81234.50"), "SENSEX"
         ))
+
+    def test_maps_optional_change_fields_and_exchange_timestamp_for_all_indices(self):
+        """Preserve documented point, percentage, and quote-update fields by identity."""
+        names = list(self.service._SUPPORTED_INDEXES)
+        rows = []
+        for index, name in enumerate(names):
+            segment, identifier, _exchange = self.service._SUPPORTED_INDEXES[name]
+            rows.append({
+                "exchange_token": identifier,
+                "exchange": segment,
+                "ltp": "100.00",
+                "change": str((index - 2) * 1.25),
+                "per_change": str((index - 2) * 0.50),
+                "ohlc": {"close": "99.00"},
+                "lstup_time": "1794873600",
+            })
+        self.provider.get_quotes.return_value = list(reversed(rows))
+
+        quotes = self.service.get_quotes(names)
+
+        self.provider.get_quotes.assert_called_once()
+        self.assertEqual([quote.index_name for quote in quotes], names)
+        self.assertEqual(
+            [quote.change for quote in quotes],
+            [Decimal(value) for value in ("-2.50", "-1.25", "0.00", "1.25", "2.50", "3.75")],
+        )
+        self.assertEqual(
+            [quote.percent_change for quote in quotes],
+            [Decimal(value) for value in ("-1.00", "-0.50", "0.00", "0.50", "1.00", "1.50")],
+        )
+        self.assertTrue(all(quote.quote_timestamp == datetime(2026, 11, 17, tzinfo=timezone.utc) for quote in quotes))
+
+    def test_missing_change_fields_remain_unavailable(self):
+        """Keep absent change and exchange timestamp fields as None."""
+        self.provider.get_quotes.return_value = [{
+            **self.row("Nifty 50", "100"),
+            "ohlc": {"close": "99"},
+            "lstup_time": "invalid",
+        }]
+        quote = self.service.get_quotes(["NIFTY 50"])[0]
+        self.assertIsNone(quote.change)
+        self.assertIsNone(quote.percent_change)
+        self.assertIsNone(quote.quote_timestamp)
+
+    def test_malformed_change_values_fail_closed(self):
+        """Reject nonnumeric, nonfinite, blank, and boolean change fields."""
+        for field, value in (
+            ("change", "bad"), ("change", "NaN"), ("change", "Infinity"),
+            ("change", " "), ("change", True), ("per_change", "bad"),
+            ("per_change", "-Infinity"),
+        ):
+            with self.subTest(field=field, value=value):
+                self.provider.get_quotes.return_value = [
+                    {**self.row("Nifty 50", "100"), field: value}
+                ]
+                with self.assertRaises(IndexQuoteResponseError):
+                    self.service.get_quotes(["NIFTY 50"])
+
+    def test_index_identity_mismatch_is_not_used(self):
+        """Do not map otherwise valid changes from the wrong segment or identifier."""
+        self.provider.get_quotes.return_value = [{
+            "exchange_token": "Nifty 50", "exchange": "bse_cm", "ltp": "100",
+            "change": "1", "per_change": "1",
+        }]
+        with self.assertRaisesRegex(IndexQuoteResponseError, "missing index quote"):
+            self.service.get_quotes(["NIFTY 50"])
 
     def test_empty_input_does_not_call_provider(self):
         """Return an empty list without making a REST request."""

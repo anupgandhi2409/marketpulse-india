@@ -103,7 +103,7 @@ class CrudeOilFuturesQuoteServiceTests(unittest.TestCase):
         self.assertEqual(result.contract_trading_symbol, "CRUDEOIL19NOV26FUT")
         self.assertEqual(result.instrument_token, "573422")
         self.assertEqual(result.contract_expiry_timestamp, self.now + timedelta(days=4))
-        self.assertEqual(result.quotation_unit, "INR per barrel")
+        self.assertEqual(result.quotation_unit, "₹ per barrel")
         self.assertEqual(result.price, Decimal("8369"))
         self.assertEqual(result.absolute_change, Decimal("69"))
         self.assertEqual(result.percentage_change, Decimal("0.8313"))

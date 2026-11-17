@@ -3,12 +3,15 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import Mock
 
+from marketpulse.analytics.market_movers import StockChange
 from marketpulse.data.index_quote import IndexQuote
 from marketpulse.data.index_quote_service import IndexQuoteProviderError
 from marketpulse.data.kotak_neo import KotakConfigurationError
+from marketpulse.data.market_movers_service import Nifty50Quote
 from marketpulse.dashboard.market_data import (
     INDEX_NAMES,
     DashboardMarketData,
+    _market_mover_row,
     refresh_market_data,
     safe_error_message,
 )
@@ -81,6 +84,16 @@ class DashboardMarketDataTests(unittest.TestCase):
             "secret",
             safe_error_message(RuntimeError("secret"), "unknown"),
         )
+
+    def test_mover_table_values_use_exact_two_decimal_formatting(self):
+        """Keep dashboard changes signed and prices consistently grouped."""
+        quote = Nifty50Quote(
+            "123", "SYNTH", "SYNTH-EQ", "nse_cm",
+            Decimal("12345.6"), Decimal("1.2"), Decimal("0.5"),
+        )
+        row = _market_mover_row(1, StockChange("SYNTH", Decimal("1.234")), quote)
+        self.assertEqual(row.percent_change, "+1.23%")
+        self.assertEqual(row.last_traded_price, "12,345.60")
 
 
 if __name__ == "__main__":

@@ -28,5 +28,10 @@ class Settings:
     def instrument_dir(self) -> Path:
         return self.data_dir / "instruments"
 
+    @property
+    def reports_dir(self) -> Path:
+        """Return the project-local directory used for generated report files."""
+        return self.data_dir / "reports"
+
 
 settings = Settings()

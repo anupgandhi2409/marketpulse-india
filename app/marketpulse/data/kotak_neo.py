@@ -54,17 +54,3 @@ class KotakNeoProvider:
         quote_type: str | None = None,
     ) -> Any:
         return self._client.quotes(instrument_tokens=instrument_tokens, quote_type=quote_type)
-
-    def get_historical_data(
-        self,
-        neosymbol: str,
-        interval: str,
-        from_date: str,
-        to_date: str,
-    ) -> Any:
-        return self._client.historical_data(
-            neosymbol=neosymbol,
-            interval=interval,
-            from_date=from_date,
-            to_date=to_date,
-        )

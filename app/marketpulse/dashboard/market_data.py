@@ -4,14 +4,9 @@ from decimal import Decimal
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from marketpulse.analytics.currency_conversion import (
-    CurrencyConversionError,
-    convert_crudeoil_inr_to_indicative_usd,
-)
 from marketpulse.config.settings import Settings
 from marketpulse.data.commodity_futures_quote import CommodityFuturesQuote
 from marketpulse.data.commodity_futures_quote_service import CommodityFuturesMasterError
-from marketpulse.data.currency_futures_quote import CurrencyFuturesQuote
 from marketpulse.data.crude_oil_futures_quote_service import CrudeOilFuturesQuoteService
 from marketpulse.data.gold_futures_quote import GoldFuturesQuote
 from marketpulse.data.gold_futures_quote_service import GoldFuturesQuoteService
@@ -41,10 +36,6 @@ from marketpulse.data.sector_performance_service import (
     SectorPerformanceDataError,
     SectorPerformanceService,
 )
-from marketpulse.data.usdinr_futures_quote_service import (
-    UsdInrFuturesQuoteService,
-    UsdInrMasterError,
-)
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -65,7 +56,6 @@ class DashboardMarketData:
     index_retrieved_at: datetime | None = None
     gold_quote: GoldFuturesQuote | None = None
     silver_quote: SilverFuturesQuote | None = None
-    usdinr_quote: CurrencyFuturesQuote | None = None
     crude_oil_quote: CommodityFuturesQuote | None = None
     sector_performance: tuple[SectorPerformance, ...] = ()
     market_movers: MarketMoversResult | None = None
@@ -87,7 +77,6 @@ class DashboardServices:
     indices: IndexQuoteService
     gold: GoldFuturesQuoteService
     silver: SilverFuturesQuoteService
-    usdinr: UsdInrFuturesQuoteService
     crude_oil: CrudeOilFuturesQuoteService
     sectors: SectorPerformanceService
     market_movers: MarketMoversService
@@ -96,23 +85,15 @@ class DashboardServices:
 
 @dataclass(frozen=True)
 class CommodityMarketCard:
-    """Provide formatted data and cache state for one dashboard commodity card."""
+    """Provide compact formatted values and cache state for one commodity card."""
 
-    section: str
     title: str
-    subtitle: str
-    price_label: str
     price: str
     change: str
-    contract_symbol: str
+    direction: str
     retrieved_at: datetime | None
     cached: bool
     error: str | None = None
-    usd_equivalent: str | None = None
-    usd_note: str | None = None
-    usd_rate_contract_symbol: str | None = None
-    usd_rate_retrieved_at: datetime | None = None
-    usd_rate_cached: bool = False
 
 
 @dataclass(frozen=True)
@@ -176,7 +157,6 @@ def create_dashboard_services(settings: Settings | None = None) -> DashboardServ
         indices=IndexQuoteService(provider),
         gold=GoldFuturesQuoteService(store, instrument_service, provider),
         silver=SilverFuturesQuoteService(store, instrument_service, provider),
-        usdinr=UsdInrFuturesQuoteService(store, instrument_service, provider),
         crude_oil=CrudeOilFuturesQuoteService(store, instrument_service, provider),
         sectors=SectorPerformanceService(provider),
         market_movers=MarketMoversService(
@@ -224,7 +204,6 @@ def refresh_dashboard_data(
     quote_services = (
         ("gold", services.gold, "gold_quote"),
         ("silver", services.silver, "silver_quote"),
-        ("usdinr", services.usdinr, "usdinr_quote"),
         ("crude_oil", services.crude_oil, "crude_oil_quote"),
     )
     for section, service, field in quote_services:
@@ -280,8 +259,8 @@ def build_year_high_table(
             YearHighTableRow(
                 rank=index,
                 symbol=stock.symbol,
-                last_traded_price=str(stock.last_traded_price),
-                year_high=str(stock.year_high),
+                last_traded_price=f"{stock.last_traded_price:,.2f}",
+                year_high=f"{stock.year_high:,.2f}",
             )
             for index, stock in enumerate(result.stocks, start=1)
         ),
@@ -352,13 +331,13 @@ def build_market_movers_tables(
 
 
 def _market_mover_row(rank: int, change: StockChange, quote: Nifty50Quote) -> MarketMoverTableRow:
-    """Format a validated mover with its service-provided percentage and LTP."""
+    """Format a validated mover with signed two-decimal change and price text."""
     value = change.percent_change
     return MarketMoverTableRow(
         rank=rank,
         symbol=change.symbol,
-        percent_change=f"+{value}%" if value > 0 else f"{value}%",
-        last_traded_price=str(quote.last_traded_price),
+        percent_change=f"+{value:.2f}%" if value > 0 else f"{value:.2f}%",
+        last_traded_price=f"{quote.last_traded_price:,.2f}",
         direction="positive" if value > 0 else "negative" if value < 0 else "neutral",
     )
 
@@ -448,7 +427,7 @@ def build_sector_heatmap_tiles(
     return tuple(
         SectorHeatmapTile(
             sector_name=item.sector_name,
-            index_value=str(item.index_value),
+            index_value=f"{item.index_value:,.2f}",
             percent_change=_format_sector_change(item.percent_change),
             direction=("positive" if item.percent_change > 0 else "negative" if item.percent_change < 0 else "neutral"),
             retrieved_at=item.retrieved_at,
@@ -461,8 +440,8 @@ def build_sector_heatmap_tiles(
 def _format_sector_change(value: Decimal) -> str:
     """Format a signed sector percentage while retaining zero as neutral text."""
     if value > 0:
-        return f"+{value}%"
-    return f"{value}%"
+        return f"+{value:.2f}%"
+    return f"{value:.2f}%"
 
 
 def _validate_sector_snapshot(sector_quotes: tuple[SectorPerformance, ...]) -> None:
@@ -490,86 +469,61 @@ def build_commodity_cards(
     market_data: DashboardMarketData,
     errors: tuple[str, ...] = (),
 ) -> tuple[CommodityMarketCard, ...]:
-    """Format four commodity and currency quote cards without Streamlit dependencies."""
+    """Format three rupee-denominated commodity quote cards without Streamlit."""
     definitions = (
-        ("gold", "Gold", "MCX Gold Futures", "Price", market_data.gold_quote),
-        ("silver", "Silver", "MCX Silver Futures", "Price", market_data.silver_quote),
-        ("usdinr", "USD/INR", "USD/INR Currency Futures", "Rate", market_data.usdinr_quote),
-        ("crude_oil", "Crude Oil", "MCX Crude Oil Futures", "Price", market_data.crude_oil_quote),
+        ("gold", "Gold", market_data.gold_quote),
+        ("silver", "Silver", market_data.silver_quote),
+        ("crude_oil", "Crude Oil", market_data.crude_oil_quote),
     )
     cards: list[CommodityMarketCard] = []
-    for section, title, subtitle, price_label, quote in definitions:
+    for section, title, quote in definitions:
         error = next((message for message in errors if message.startswith(_ERROR_PREFIX[section])), None)
-        usd_equivalent = None
-        usd_note = None
-        usd_rate_symbol = None
-        usd_rate_retrieved_at = None
-        usd_rate_cached = False
-        if section == "crude_oil":
-            usd_note = "Indicative conversion; market-data freshness not independently verified. Basis: USD/INR currency futures."
-            usdinr_quote = market_data.usdinr_quote
-            usd_rate_cached = any(
-                message.startswith(_ERROR_PREFIX["usdinr"]) for message in errors
-            )
-            if usdinr_quote is not None:
-                usd_rate_symbol = usdinr_quote.contract_trading_symbol
-                usd_rate_retrieved_at = usdinr_quote.retrieved_at
-            if quote is not None and usdinr_quote is not None:
-                try:
-                    conversion = convert_crudeoil_inr_to_indicative_usd(
-                        quote.price,
-                        usdinr_quote.price,
-                        rate_source=usdinr_quote.source,
-                        rate_instrument_type=usdinr_quote.instrument_type,
-                    )
-                except CurrencyConversionError:
-                    usd_equivalent = "Unavailable"
-                else:
-                    usd_equivalent = f"{conversion.usd_per_barrel} USD/barrel"
-            else:
-                usd_equivalent = "Unavailable"
         if quote is None:
             cards.append(
                 CommodityMarketCard(
-                    section=section,
                     title=title,
-                    subtitle=subtitle,
-                    price_label=price_label,
-                    price="Unavailable",
-                    change="Unavailable",
-                    contract_symbol="Unavailable",
+                    price="—",
+                    change="—",
+                    direction="neutral",
                     retrieved_at=None,
                     cached=False,
                     error=error or "No successful retrieval yet.",
-                    usd_equivalent=usd_equivalent,
-                    usd_note=usd_note,
-                    usd_rate_contract_symbol=usd_rate_symbol,
-                    usd_rate_retrieved_at=usd_rate_retrieved_at,
-                    usd_rate_cached=usd_rate_cached,
                 )
             )
             continue
 
         cards.append(
             CommodityMarketCard(
-                section=section,
                 title=title,
-                subtitle=subtitle,
-                price_label=price_label,
-                price=f"{quote.price} {quote.quotation_unit}",
-                change=f"{quote.absolute_change} ({quote.percentage_change}%)",
-                contract_symbol=quote.contract_trading_symbol,
+                price=f"₹{_format_card_decimal(quote.price)}",
+                change=(
+                    f"{_format_card_signed(quote.absolute_change)} "
+                    f"({_format_card_signed(quote.percentage_change)}%)"
+                ),
+                direction=(
+                    "positive" if quote.absolute_change > 0
+                    else "negative" if quote.absolute_change < 0 else "neutral"
+                ),
                 retrieved_at=quote.retrieved_at,
                 cached=error is not None,
                 error=error,
-                usd_equivalent=usd_equivalent,
-                usd_note=usd_note,
-                usd_rate_contract_symbol=usd_rate_symbol,
-                usd_rate_retrieved_at=usd_rate_retrieved_at,
-                usd_rate_cached=usd_rate_cached,
             )
         )
     return tuple(cards)
+
+
+def _format_card_decimal(value: Decimal | None) -> str:
+    """Format a validated finite card value or show an em dash."""
+    if not isinstance(value, Decimal) or not value.is_finite() or value <= 0:
+        return "—"
+    return f"{value:,.2f}"
+
+
+def _format_card_signed(value: Decimal | None) -> str:
+    """Format a signed finite change without estimating unavailable values."""
+    if not isinstance(value, Decimal) or not value.is_finite():
+        return "—"
+    return f"{value:+,.2f}" if value != 0 else "0.00"
 
 
 def format_retrieved_at(value: datetime | None) -> str:
@@ -590,7 +544,7 @@ def safe_error_message(error: Exception, section: str) -> str:
     if section == "year_high" and isinstance(error, MarketMoversDataError):
         return "NIFTY 100 52-week-high scan unavailable; constituent data or quote coverage is invalid."
     if section in _ERROR_PREFIX:
-        if isinstance(error, (CommodityFuturesMasterError, UsdInrMasterError, FileNotFoundError)):
+        if isinstance(error, (CommodityFuturesMasterError, FileNotFoundError)):
             return f"{_ERROR_PREFIX[section]}: local instrument master is unavailable or invalid."
         return f"{_ERROR_PREFIX[section]}: quote refresh failed."
     if section == "market":
@@ -608,7 +562,6 @@ def _local_now() -> datetime:
 _ERROR_PREFIX = {
     "gold": "Gold futures",
     "silver": "Silver futures",
-    "usdinr": "USD/INR futures",
     "crude_oil": "Crude Oil futures",
     "sectors": "NSE sector heatmap",
     "market_movers": "NIFTY 100 market movers",

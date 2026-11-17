@@ -16,5 +16,5 @@ class CrudeOilFuturesQuoteService(CommodityFuturesQuoteService):
     """Retrieve the nearest active standard MCX Crude Oil futures quote."""
 
     COMMODITY = "CRUDEOIL"
-    QUOTATION_UNIT = "INR per barrel"
+    QUOTATION_UNIT = "₹ per barrel"
     QUOTE_MODEL = CommodityFuturesQuote

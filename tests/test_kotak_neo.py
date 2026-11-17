@@ -87,27 +87,5 @@ class KotakNeoProviderTests(unittest.TestCase):
         )
         self.assertIs(result, response)
 
-    def test_get_historical_data_forwards_arguments_and_returns_response(self):
-        response = {"data": ["candle"]}
-        client = Mock()
-        client.historical_data.return_value = response
-        provider = KotakNeoProvider(client=client)
-
-        result = provider.get_historical_data(
-            neosymbol="nse_cm|1333",
-            interval="D",
-            from_date="2026-11-01",
-            to_date="2026-11-13",
-        )
-
-        client.historical_data.assert_called_once_with(
-            neosymbol="nse_cm|1333",
-            interval="D",
-            from_date="2026-11-01",
-            to_date="2026-11-13",
-        )
-        self.assertIs(result, response)
-
-
 if __name__ == "__main__":
     unittest.main()

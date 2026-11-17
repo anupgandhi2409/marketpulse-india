@@ -16,5 +16,5 @@ class SilverFuturesQuoteService(CommodityFuturesQuoteService):
     """Retrieve an active standard MCX Silver futures quote through Kotak Neo."""
 
     COMMODITY = "SILVER"
-    QUOTATION_UNIT = "INR per kg"
+    QUOTATION_UNIT = "₹ per kg"
     QUOTE_MODEL = SilverFuturesQuote

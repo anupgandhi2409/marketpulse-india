@@ -1,4 +1,5 @@
 from decimal import Decimal, InvalidOperation
+from datetime import datetime, timezone
 from typing import Any
 
 from marketpulse.data.index_quote import IndexQuote
@@ -68,7 +69,7 @@ class IndexQuoteService:
             (self._SUPPORTED_INDEXES[name][0], self._SUPPORTED_INDEXES[name][1]): name
             for name in index_names
         }
-        values: dict[tuple[str, str], Decimal] = {}
+        values: dict[tuple[str, str], tuple[Decimal, Decimal | None, Decimal | None, datetime | None]] = {}
         for row in response:
             if not isinstance(row, dict):
                 raise IndexQuoteResponseError("Kotak Neo index quote row must be an object.")
@@ -94,7 +95,12 @@ class IndexQuoteService:
                 raise IndexQuoteResponseError(
                     f"Kotak Neo index LTP is malformed for {token!r}."
                 )
-            values[key] = value
+            change = _optional_decimal(row, "change", token)
+            percent_change = _optional_decimal(row, "per_change", token)
+            quote_timestamp = _optional_epoch_timestamp(
+                row.get("lstup_time", row.get("timestamp"))
+            )
+            values[key] = (value, change, percent_change, quote_timestamp)
 
         results: list[IndexQuote] = []
         for name in index_names:
@@ -104,11 +110,46 @@ class IndexQuoteService:
                 raise IndexQuoteResponseError(
                     f"Kotak Neo response is missing index quote for {name!r}."
                 )
+            index_value, change, percent_change, quote_timestamp = values[key]
             results.append(IndexQuote(
                 index_name=name,
                 exchange=exchange,
                 source=self.SOURCE,
-                index_value=values[key],
+                index_value=index_value,
                 instrument_identifier=identifier,
+                change=change,
+                percent_change=percent_change,
+                quote_timestamp=quote_timestamp,
             ))
         return results
+
+
+def _optional_decimal(row: dict[str, Any], field: str, token: str) -> Decimal | None:
+    """Parse an optional finite quote change, preserving missing values as unavailable."""
+    if field not in row or row[field] is None:
+        return None
+    value = row[field]
+    if isinstance(value, bool):
+        raise IndexQuoteResponseError(f"Kotak Neo index {field} is malformed for {token!r}.")
+    try:
+        result = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError) as exc:
+        raise IndexQuoteResponseError(
+            f"Kotak Neo index {field} is malformed for {token!r}."
+        ) from exc
+    if not result.is_finite():
+        raise IndexQuoteResponseError(f"Kotak Neo index {field} is malformed for {token!r}.")
+    return result
+
+
+def _optional_epoch_timestamp(value: Any) -> datetime | None:
+    """Convert a documented Unix quote-update time, leaving invalid values unavailable."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        epoch = Decimal(str(value).strip())
+        if not epoch.is_finite() or epoch <= 0:
+            return None
+        return datetime.fromtimestamp(float(epoch), tz=timezone.utc)
+    except (InvalidOperation, ValueError, OverflowError, OSError):
+        return None
