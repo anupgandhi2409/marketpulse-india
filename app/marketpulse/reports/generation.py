@@ -34,7 +34,7 @@ def generate_market_report(
     renderer: ReportPdfRenderer | None = None,
     file_store: ReportFileStore | None = None,
 ) -> ReportGenerationResult:
-    """Collect the Morning snapshot, render its PDF, and save it using existing components."""
+    """Collect the report snapshot, render its PDF, and save it using existing components."""
     if report_date is not None and (
         not isinstance(report_date, date) or isinstance(report_date, datetime)
     ):

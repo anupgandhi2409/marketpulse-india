@@ -17,7 +17,7 @@ PDF_FIXTURE = b"%PDF-1.4\nfixture\n%%EOF\n"
 
 
 class ReportGenerationTests(TestCase):
-    """Verify the one Morning report path and safe write behavior."""
+    """Verify the one report path and safe write behavior."""
 
     def setUp(self):
         """Prepare injected collector, renderer, and file store doubles."""
@@ -57,7 +57,7 @@ class ReportGenerationTests(TestCase):
         self.file_store.save.assert_not_called()
 
     def test_real_renderer_and_store_work_without_providers(self):
-        """Create an isolated Morning PDF from synthetic snapshot data."""
+        """Create an isolated Evening PDF from synthetic snapshot data."""
         with TemporaryDirectory() as temporary:
             result = generate_market_report(
                 report_date=date(2026, 11, 17),
@@ -67,7 +67,7 @@ class ReportGenerationTests(TestCase):
                 file_store=ReportFileStore(Settings(project_root=Path(temporary))),
             )
             self.assertTrue(result.path.read_bytes().startswith(b"%PDF-"))
-            self.assertIn("marketpulse_morning_2026-11-17.pdf", str(result.path))
+            self.assertIn("marketpulse_evening_2026-11-17.pdf", str(result.path))
 
 
 def datetime_invalid():

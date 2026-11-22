@@ -40,8 +40,8 @@ SECTOR_NEUTRAL = "#E5E4DD"
 
 def main() -> None:
     """Render the read-only dashboard and refresh datasets only on button click."""
-    st.set_page_config(page_title="Morning Market Pulse", layout="wide")
-    st.title("Morning Market Pulse")
+    st.set_page_config(page_title="Evening Market Pulse", layout="wide")
+    st.title("Evening Market Pulse")
 
     if _DATA_STATE_KEY not in st.session_state:
         st.session_state[_DATA_STATE_KEY] = DashboardMarketData()
@@ -76,8 +76,8 @@ def main() -> None:
 
 
 def _render_pdf_reports() -> None:
-    """Render the manual Morning report controls and expose only a saved PDF."""
-    st.subheader("Generate / Download Morning PDF")
+    """Render the manual Evening report controls and expose only a saved PDF."""
+    st.subheader("Generate / Download Evening PDF")
     st.caption(
         "PDF generation collects market data independently and may produce a different "
         "snapshot from the dashboard cards."
@@ -128,7 +128,7 @@ def _render_pdf_reports() -> None:
         snapshot = artifact["snapshot"]
         available, unavailable = _report_section_summary(snapshot)
         st.success(
-            f"Morning report for {snapshot.report_date} "
+            f"Evening report for {snapshot.report_date} "
             f"generated at {_format_timestamp(snapshot.generated_at)}."
         )
         st.caption(f"File: {artifact['filename']}")

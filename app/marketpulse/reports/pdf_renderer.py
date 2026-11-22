@@ -172,7 +172,7 @@ class ReportPdfError(ValueError):
 
 
 class ReportPdfRenderer:
-    """Render the Morning report snapshot using A4 Platypus flowables."""
+    """Render the Evening report snapshot using A4 Platypus flowables."""
 
     def __init__(self) -> None:
         """Prepare report styles and a system Unicode font for source headlines."""
@@ -245,7 +245,7 @@ class ReportPdfRenderer:
             rightMargin=PAGE_MARGIN,
             topMargin=19 * mm,
             bottomMargin=17 * mm,
-            title="Morning Market Pulse",
+            title="Evening Market Pulse",
             author="",
             pageCompression=0,
         )
@@ -261,7 +261,7 @@ class ReportPdfRenderer:
     def _build_story(self, snapshot: ReportSnapshot) -> list[Any]:
         """Build ordered report flowables from the snapshot's existing section models."""
         story: list[Any] = [
-            Paragraph("Morning Market Pulse", self._styles["title"]),
+            Paragraph("Evening Market Pulse", self._styles["title"]),
             Paragraph(
                 f"Report date: {snapshot.report_date.strftime('%d %B %Y')}"
                 f" &nbsp;&nbsp; Generated at: {_format_timestamp(snapshot.generated_at)}",
@@ -285,7 +285,7 @@ class ReportPdfRenderer:
         story: list[Any],
         sections: ReportArticleSections,
     ) -> None:
-        """Render the three capped news categories at the end of the Morning report."""
+        """Render the three capped news categories at the end of the Evening report."""
         headings = (
             ("Stock Market News", sections.stock_market),
             ("Economic News", sections.economic),
@@ -624,7 +624,7 @@ class ReportPdfRenderer:
         canvas.rect(0, 0, A4[0], A4[1], stroke=0, fill=1)
         canvas.setFillColor(INK)
         canvas.setFont("Helvetica-Bold", 7.5)
-        canvas.drawString(PAGE_MARGIN, A4[1] - 10 * mm, "MORNING MARKET PULSE")
+        canvas.drawString(PAGE_MARGIN, A4[1] - 10 * mm, "EVENING MARKET PULSE")
         canvas.setStrokeColor(RULE)
         canvas.setLineWidth(0.5)
         canvas.line(PAGE_MARGIN, A4[1] - 12 * mm, A4[0] - PAGE_MARGIN, A4[1] - 12 * mm)

@@ -1,4 +1,4 @@
-"""Tests for Morning PDF structure and source-safe quote presentation."""
+"""Tests for Evening PDF structure and source-safe quote presentation."""
 
 import re
 from dataclasses import replace
@@ -25,14 +25,15 @@ from tests.test_report_snapshot import _snapshot
 
 
 class ReportPdfRendererTests(TestCase):
-    """Verify the retained report sections render in Morning order."""
+    """Verify the retained report sections render in their established order."""
 
     def test_renders_market_data_and_last_trading_day_sections(self):
         """Include the approved indices, commodities, and prior-day data group."""
         pdf = ReportPdfRenderer().render(_snapshot())
         self.assertTrue(pdf.startswith(b"%PDF-"))
+        self.assertIn(b"/Title (Evening Market Pulse)", pdf)
         for label in (
-            b"Morning Market Pulse", b"Major Market Indices", b"Commodities",
+            b"Evening Market Pulse", b"Major Market Indices", b"Commodities",
             b"Last Trading Day Data",
             b"NIFTY 50", b"BANK NIFTY", b"NIFTY IT", b"NIFTY MIDCAP 100",
             b"NIFTY SMALLCAP 100", b"SENSEX", b"Gold", b"Silver", b"Crude Oil",
@@ -120,7 +121,7 @@ class ReportPdfRendererTests(TestCase):
         self.assertIn(b".898039 .894118 .866667 rg", pdf)
 
     def test_index_cards_render_source_changes_with_sign_colors_and_quote_time(self):
-        """Show six provider changes in the Morning PDF with accurate fallback states."""
+        """Show six provider changes in the Evening PDF with accurate fallback states."""
         snapshot = _snapshot()
         signs = (Decimal("2"), Decimal("-1"), Decimal("0"))
         updated = tuple(

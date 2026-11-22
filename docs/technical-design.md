@@ -2,7 +2,7 @@
 
 ## Runtime structure
 
-The Python application is under `app/marketpulse`. Streamlit presents the local dashboard and manual Morning PDF controls. Data services can be used independently of Streamlit. Kotak Neo access is read-only at the application boundary.
+The Python application is under `app/marketpulse`. Streamlit presents the local dashboard and manual Evening PDF controls. Data services can be used independently of Streamlit. Kotak Neo access is read-only at the application boundary.
 
 ## Market data
 
@@ -43,11 +43,11 @@ Market-data services + optional ET RSS acquisition
 
 `reports/generation.py` orchestrates collection, PDF byte generation and publication. `reports/pdf_renderer.py` renders the order: six indices; Gold, Silver and Crude Oil; Last Trading Day Data with sectors, movers and 52-week highs; then Stock Market News, Economic News and Company News. The first heading doubles as the stocks category heading. The PDF uses an ivory page background, compact rounded quote cards with regular-weight Change lines, and rounded sector tiles with sign-based fills (`#A6CF98`, `#FF8080`, and a neutral ivory-compatible fill). Sector names, percentages and index values occupy distinct lines. Gainers and losers begin on page two with their tables kept with the heading. News links use validated original ET article URLs.
 
-`reports/file_store.py` stages output locally and atomically publishes `data/reports/marketpulse_morning_<YYYY-MM-DD>.pdf`. Existing files are protected unless replacement is explicitly requested.
+`reports/file_store.py` stages output locally and atomically publishes `data/reports/marketpulse_evening_<YYYY-MM-DD>.pdf`. Existing files are protected unless replacement is explicitly requested.
 
 ## Streamlit behavior
 
-`dashboard/app.py` begins with session-state data and creates quote services only after **Refresh Market Data**. It displays indices, commodities and Last Trading Day Data in that order, followed by manual Morning PDF controls. Market index and commodity cards use a shared responsive HTML grid and shared typography. Heatmap tiles use one responsive CSS grid with equal row and column gaps. Dashboard ranking tables use Pandas Styler CSS to center every header and cell while retaining change-sign coloring; the 52-week-high table uses the same centering helper. Financial table values are preformatted to two decimals and currency labels use `₹`. News is neither displayed nor collected during dashboard refresh. PDF generation performs its own collection. The saved PDF bytes are held in session state for the download action, and user-visible failures use fixed safe messages.
+`dashboard/app.py` begins with session-state data and creates quote services only after **Refresh Market Data**. It displays indices, commodities and Last Trading Day Data in that order, followed by manual Evening PDF controls. Market index and commodity cards use a shared responsive HTML grid and shared typography. Heatmap tiles use one responsive CSS grid with equal row and column gaps. Dashboard ranking tables use Pandas Styler CSS to center every header and cell while retaining change-sign coloring; the 52-week-high table uses the same centering helper. Financial table values are preformatted to two decimals and currency labels use `₹`. News is neither displayed nor collected during dashboard refresh. PDF generation performs its own collection. The saved PDF bytes are held in session state for the download action, and user-visible failures use fixed safe messages.
 
 ## Security and intentional limitations
 

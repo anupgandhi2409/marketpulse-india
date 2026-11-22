@@ -26,8 +26,8 @@ class ReportFileStoreTests(TestCase):
         self.store = ReportFileStore(config)
         self.snapshot = _snapshot()
 
-    def test_morning_filename_uses_snapshot_kind_and_report_date(self):
-        """Use the morning identity and date from the supplied snapshot."""
+    def test_evening_filename_uses_snapshot_kind_and_report_date(self):
+        """Use the evening identity and date from the supplied snapshot."""
         path = self.store.save(self.snapshot, PDF_FIXTURE)
 
         self.assertEqual(
@@ -35,7 +35,7 @@ class ReportFileStoreTests(TestCase):
             Path(self.temporary_directory.name)
             / "data"
             / "reports"
-            / "marketpulse_morning_2026-11-17.pdf",
+            / "marketpulse_evening_2026-11-17.pdf",
         )
 
     def test_directory_is_created_lazily_and_pdf_bytes_are_saved(self):
@@ -94,7 +94,7 @@ class ReportFileStoreTests(TestCase):
 
     def test_racing_writer_cannot_be_overwritten_without_permission(self):
         """Preserve a target created after staging but before exclusive publish."""
-        path = self.store._config.reports_dir / "marketpulse_morning_2026-11-17.pdf"
+        path = self.store._config.reports_dir / "marketpulse_evening_2026-11-17.pdf"
         racing_bytes = b"%PDF-1.4\nracing writer\n%%EOF\n"
 
         def create_racing_target(source, target):

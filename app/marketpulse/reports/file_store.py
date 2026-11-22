@@ -37,7 +37,7 @@ class ReportFileStore:
         if not isinstance(overwrite, bool):
             raise ReportFileStoreError("Overwrite must be explicitly enabled or disabled.")
 
-        filename = f"marketpulse_morning_{snapshot.report_date.isoformat()}.pdf"
+        filename = f"marketpulse_evening_{snapshot.report_date.isoformat()}.pdf"
         directory = self._config.reports_dir
         target = directory / filename
         temporary_path: Path | None = None

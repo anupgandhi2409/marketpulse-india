@@ -80,7 +80,7 @@ class DashboardAppTests(unittest.TestCase):
             markdown=Mock(), metric=Mock(),
         )
 
-    def test_initial_render_is_read_only_and_shows_morning_download_area(self):
+    def test_initial_render_is_read_only_and_shows_evening_download_area(self):
         """Do not create services or make requests before an explicit user click."""
         streamlit = self._stub()
         with patch.object(app, "st", streamlit), patch.object(app, "create_dashboard_services") as factory, patch.object(app, "_render_market_data") as render:
@@ -88,7 +88,7 @@ class DashboardAppTests(unittest.TestCase):
         factory.assert_not_called()
         render.assert_called_once_with(DashboardMarketData(), ())
         labels = [call.args[0] for call in streamlit.subheader.call_args_list]
-        self.assertEqual(labels, ["Generate / Download Morning PDF"])
+        self.assertEqual(labels, ["Generate / Download Evening PDF"])
         self.assertFalse(hasattr(streamlit, "selectbox"))
 
     def test_report_section_summary_counts_market_sections_only(self):
@@ -107,13 +107,13 @@ class DashboardAppTests(unittest.TestCase):
         script = Path(__file__).resolve().parents[1] / "app/marketpulse/dashboard/app.py"
         rendered = AppTest.from_file(str(script)).run()
         self.assertEqual(len(rendered.exception), 0)
-        self.assertEqual([item.value for item in rendered.title], ["Morning Market Pulse"])
+        self.assertEqual([item.value for item in rendered.title], ["Evening Market Pulse"])
         self.assertEqual(
             [item.value for item in rendered.subheader],
             [
                 "Major Market Indices", "Commodities", "Last Trading Day Data",
                 "Sector Performance Heatmap", "NIFTY 100 Top Gainers and Losers",
-                "NIFTY 100 Stocks at 52-Week High", "Generate / Download Morning PDF",
+                "NIFTY 100 Stocks at 52-Week High", "Generate / Download Evening PDF",
             ],
         )
         self.assertFalse(any("Economic Times" in item.value for item in rendered.subheader))
